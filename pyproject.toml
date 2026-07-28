@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kids-spotify-player"
+version = "0.1.0"
+description = "A child-friendly Raspberry Pi Spotify player controlled using NFC cards and physical buttons."
+readme = "readme.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+    { name = "BenjaminJonathanDoe" }
+]
+dependencies = []
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
