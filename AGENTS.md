@@ -71,3 +71,23 @@ python --version
 python -m pip --version
 
 All tests must be executed in the local virtual environment.
+
+Use the currently selected VS Code interpreter.
+
+Do not use a sandbox Python installation.
+
+Run all commands inside the project's .venv.
+
+Before making changes verify the environment by running:
+
+python --version
+python -m pip --version
+where python
+
+Never execute:
+
+pip install ...
+
+Always execute:
+
+python -m pip install ...

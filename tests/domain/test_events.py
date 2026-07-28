@@ -13,6 +13,7 @@ from kidsspotifyplayer.domain.events import (
     ApplicationStarted,
     ApplicationStopping,
     ConfigurationFailed,
+    Event,
     HardwareFailed,
     NetworkAvailable,
     NetworkUnavailable,
@@ -34,15 +35,22 @@ from kidsspotifyplayer.domain.events import (
 )
 
 
-def test_input_events_are_immutable() -> None:
+def test_domain_events_are_immutable_event_instances() -> None:
     detected = NfcCardDetected(card_id="card-123")
     removed = NfcCardRemoved(card_id="card-123")
+    button_pressed = PlayPausePressed()
+    playback_started = PlaybackStarted(context_uri="spotify:album:1", track_name="Song")
+    volume_changed = VolumeChanged(volume_percent=42)
+    failed = PlaybackFailed(reason="network", recoverable=True)
 
-    assert detected.card_id == "card-123"
-    assert removed.card_id == "card-123"
+    for event in (detected, removed, button_pressed, playback_started, volume_changed, failed):
+        assert isinstance(event, Event)
 
     with pytest.raises(FrozenInstanceError):
         detected.card_id = "card-999"
+
+    with pytest.raises(FrozenInstanceError):
+        volume_changed.volume_percent = 99
 
 
 def test_lifecycle_and_playback_events_store_values() -> None:

@@ -1,7 +1,0 @@
-LICENSE
-pyproject.toml
-readme.md
-src/kids_spotify_player.egg-info/PKG-INFO
-src/kids_spotify_player.egg-info/SOURCES.txt
-src/kids_spotify_player.egg-info/dependency_links.txt
-src/kids_spotify_player.egg-info/top_level.txt
