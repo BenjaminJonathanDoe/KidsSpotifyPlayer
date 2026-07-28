@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from .event_source import EventSource
+
 
 @runtime_checkable
-class ButtonInput(Protocol):
-    """Port for reading button press events."""
-
-    def wait_for_press(self) -> str:
-        """Block until a button press is observed and return its identifier."""
+class ButtonInput(EventSource, Protocol):
+    """Lifecycle-controlled port for button input event sources."""

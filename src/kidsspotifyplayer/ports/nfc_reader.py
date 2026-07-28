@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from .event_source import EventSource
+
 
 @runtime_checkable
-class NfcReader(Protocol):
-    """Port for reading NFC card identifiers."""
-
-    def read_card_id(self) -> str | None:
-        """Return the currently detected card identifier, if any."""
+class NfcReader(EventSource, Protocol):
+    """Lifecycle-controlled port for NFC input event sources."""

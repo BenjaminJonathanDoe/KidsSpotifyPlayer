@@ -29,7 +29,7 @@ The main architectural rule is:
 
 ## 3. System context
 
-```text
+
 NFC Reader ─┐
 Buttons ────┼──> Input Adapters ───> Event Bus ───> Player Controller
 ESP32* ─────┘                              │
@@ -39,7 +39,7 @@ ESP32* ─────┘                              │
                                           └──> State Management
 
 * Future extension, not part of version 1.
-```
+
 
 The Raspberry Pi Zero 2 W initially performs all core functions:
 
@@ -76,13 +76,13 @@ Its central component is the `PlayerController`. It receives events, applies rul
 
 Examples of decisions made here:
 
-- resolving an NFC card to a Spotify URI;
+- resolving an NFC card to a Spotify URL;
 - deciding whether Play/Pause should pause or resume;
 - applying volume limits;
 - handling an unknown NFC card;
 - reacting to recoverable and non-recoverable failures.
 
-The application layer must not access GPIO, SPI, I²C, I²S, network APIs, YAML, or JSON directly.
+The application layer must not access GPIO, SPI, I²C, I²S, network APIs, YAML, or JSON directly. The application and `PlayerController` never poll hardware; they receive neutral events from input adapters.
 
 ### 4.3 Ports
 
@@ -95,7 +95,8 @@ Examples:
 - `ButtonInput`;
 - `FeedbackOutput`;
 - `ConfigRepository`;
-- `AudioOutput`.
+- `AudioOutput`;
+- `EventSource`.
 
 A port describes capability, not implementation.
 
@@ -133,6 +134,8 @@ Initial adapter groups:
 - configuration file adapter;
 - fake adapters for Windows development and automated tests.
 
+Input adapters are push-based event sources. Concrete button and NFC adapters receive their event-publishing dependency during construction and publish neutral domain events while running. Examples include publishing `PlayPausePressed`, `NextTrackPressed`, `PreviousTrackPressed`, `VolumeUpPressed`, `VolumeDownPressed`, `NfcCardDetected`, and `NfcCardRemoved` into the event bus. Duplicate NFC suppression and button debouncing belong in the input adapter, not the application layer.
+
 Future adapter groups may include:
 
 - ESP32 remote input;
@@ -140,7 +143,17 @@ Future adapter groups may include:
 - alternative NFC hardware;
 - alternative feedback hardware.
 
-### 4.5 Infrastructure
+### 4.5 Input and event flow
+
+Input adapters are lifecycle-controlled event sources:
+
+- buttons;
+- NFC;
+- future ESP32 or remote inputs.
+
+They start monitoring when `start()` is called and stop monitoring when `stop()` is called. They may use callbacks or background threads internally, but the application never polls hardware directly. The event bus dependency remains inside the adapter implementation, not in the port interface.
+
+### 4.6 Infrastructure
 
 Infrastructure wires the application together and handles startup, shutdown, logging, process lifecycle, and dependency construction.
 
@@ -946,7 +959,7 @@ Recommended sequence:
 3. synchronous event bus;
 4. port interfaces;
 5. fake adapters;
-6. `PlayerController`;
+6. PlayerController;
 7. unit and integration tests;
 8. configuration loader and validation;
 9. logging and application bootstrap;

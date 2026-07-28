@@ -9,6 +9,7 @@ from kidsspotifyplayer.ports import (
     AudioOutput,
     ButtonInput,
     ConfigRepository,
+    EventSource,
     FeedbackOutput,
     NfcReader,
     SpotifyPlayer,
@@ -59,13 +60,19 @@ class FakeConfigRepository:
 
 
 class FakeNfcReader:
-    def read_card_id(self) -> str | None:
-        return "card-1"
+    def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
 
 
 class FakeButtonInput:
-    def wait_for_press(self) -> str:
-        return "play"
+    def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
 
 
 class FakeAudioOutput:
@@ -83,3 +90,18 @@ def test_protocols_are_structurally_satisfied() -> None:
     assert isinstance(FakeNfcReader(), NfcReader)
     assert isinstance(FakeButtonInput(), ButtonInput)
     assert isinstance(FakeAudioOutput(), AudioOutput)
+    assert isinstance(FakeButtonInput(), EventSource)
+    assert isinstance(FakeNfcReader(), EventSource)
+
+
+def test_old_polling_only_implementations_no_longer_satisfy_protocols() -> None:
+    class PollingButtonInput:
+        def wait_for_press(self) -> str:
+            return "play"
+
+    class PollingNfcReader:
+        def read_card_id(self) -> str | None:
+            return "card-1"
+
+    assert not isinstance(PollingButtonInput(), ButtonInput)
+    assert not isinstance(PollingNfcReader(), NfcReader)
