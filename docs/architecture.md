@@ -19,7 +19,9 @@ The architecture should:
 - support a future ESP32 input controller;
 - remain understandable and lightweight enough for a Raspberry Pi Zero 2 W;
 - continue operating through temporary network or Spotify outages;
-- support a read-only operating system where runtime persistence is not required.
+- support a read-only operating system where runtime persistence is not required;
+- serialize user input so only one command is handled at a time;
+- discard additional user input while a command is still being processed.
 
 The main architectural rule is:
 
@@ -29,17 +31,22 @@ The main architectural rule is:
 
 ## 3. System context
 
-
+```text
 NFC Reader ─┐
-Buttons ────┼──> Input Adapters ───> Event Bus ───> Player Controller
-ESP32* ─────┘                              │
-                                          ├──> Spotify Player
-                                          ├──> Audio / Volume
-                                          ├──> Feedback / LEDs
-                                          └──> State Management
+Buttons ────┼──> Input Adapters ───> Input Coordinator ───> Event Bus
+ESP32* ─────┘                               │                    │
+                                           │                    ▼
+                                           │            Player Controller
+                                           │                    │
+                                           │                    ├──> Spotify Player
+                                           │                    ├──> Audio / Volume
+                                           │                    ├──> Feedback / LEDs
+                                           │                    └──> State Management
+                                           │
+                                           └──> Global non-blocking input lock
 
 * Future extension, not part of version 1.
-
+```
 
 The Raspberry Pi Zero 2 W initially performs all core functions:
 
@@ -76,29 +83,56 @@ Its central component is the `PlayerController`. It receives events, applies rul
 
 Examples of decisions made here:
 
-- resolving an NFC card to a Spotify URL;
+- resolving an NFC card to a Spotify URI;
 - deciding whether Play/Pause should pause or resume;
 - applying volume limits;
 - handling an unknown NFC card;
 - reacting to recoverable and non-recoverable failures.
 
-The application layer must not access GPIO, SPI, I²C, I²S, network APIs, YAML, or JSON directly. The application and `PlayerController` never poll hardware; they receive neutral events from input adapters.
+The application layer must not access GPIO, SPI, I²C, I²S, network APIs, YAML, or JSON directly.
+
+The application and `PlayerController` never poll hardware. They receive neutral events from input adapters through the `InputCoordinator` and synchronous `EventBus`.
 
 ### 4.3 Ports
 
 Ports describe what the application needs from external systems.
 
+There are two categories of ports.
+
+#### Event-source ports
+
+Event-source ports represent input components that produce domain events.
+
+Examples:
+
+- `EventSource`;
+- `ButtonInput`;
+- `NfcReader`;
+- future `Esp32Input`.
+
+They expose lifecycle operations only:
+
+```python
+class EventSource:
+    def start(self) -> None:
+        ...
+
+    def stop(self) -> None:
+        ...
+```
+
+Concrete implementations receive their event-publishing dependency during construction.
+
+#### Action and service ports
+
+Action and service ports are called by the application to perform work or retrieve data.
+
 Examples:
 
 - `SpotifyPlayer`;
-- `NfcReader`;
-- `ButtonInput`;
 - `FeedbackOutput`;
-- `ConfigRepository`;
 - `AudioOutput`;
-- `EventSource`.
-
-A port describes capability, not implementation.
+- `ConfigRepository`.
 
 Example:
 
@@ -123,6 +157,8 @@ class SpotifyPlayer:
         ...
 ```
 
+A port describes capability, not implementation.
+
 ### 4.4 Adapters
 
 Adapters implement ports for concrete technologies.
@@ -134,7 +170,21 @@ Initial adapter groups:
 - configuration file adapter;
 - fake adapters for Windows development and automated tests.
 
-Input adapters are push-based event sources. Concrete button and NFC adapters receive their event-publishing dependency during construction and publish neutral domain events while running. Examples include publishing `PlayPausePressed`, `NextTrackPressed`, `PreviousTrackPressed`, `VolumeUpPressed`, `VolumeDownPressed`, `NfcCardDetected`, and `NfcCardRemoved` into the event bus. Duplicate NFC suppression and button debouncing belong in the input adapter, not the application layer.
+Input adapters are push-based event sources. Concrete button and NFC adapters receive an `InputCoordinator` during construction and use it to publish neutral domain events while running.
+
+Examples include publishing:
+
+- `PlayPausePressed`;
+- `NextTrackPressed`;
+- `PreviousTrackPressed`;
+- `VolumeUpPressed`;
+- `VolumeDownPressed`;
+- `NfcCardDetected`;
+- `NfcCardRemoved`.
+
+Duplicate NFC suppression belongs in the NFC adapter.
+
+Button debouncing belongs in the button adapter.
 
 Future adapter groups may include:
 
@@ -151,13 +201,31 @@ Input adapters are lifecycle-controlled event sources:
 - NFC;
 - future ESP32 or remote inputs.
 
-They start monitoring when `start()` is called and stop monitoring when `stop()` is called. They may use callbacks or background threads internally, but the application never polls hardware directly. The event bus dependency remains inside the adapter implementation, not in the port interface.
+They start monitoring when `start()` is called and stop monitoring when `stop()` is called.
+
+They may use callbacks, interrupts, polling loops, or background threads internally, but these implementation details remain inside the adapter.
+
+The application never polls hardware directly.
+
+The `InputCoordinator` is the single entry point for user-generated domain events.
 
 ### 4.6 Infrastructure
 
-Infrastructure wires the application together and handles startup, shutdown, logging, process lifecycle, and dependency construction.
+Infrastructure wires the application together and handles startup, shutdown, logging, process lifecycle, dependency construction, and lifecycle ownership.
 
 The composition root belongs in `main.py` or a dedicated bootstrap module.
+
+Bootstrap is responsible for:
+
+1. creating the `EventBus`;
+2. creating the `InputCoordinator`;
+3. creating the `PlayerController`;
+4. subscribing controller handlers;
+5. creating event-source adapters;
+6. starting event sources;
+7. stopping event sources during shutdown.
+
+The `PlayerController` does not start or stop hardware adapters.
 
 ---
 
@@ -180,7 +248,11 @@ src/
     ├── event_bus/
     │   └── bus.py
     │
+    ├── input/
+    │   └── coordinator.py
+    │
     ├── ports/
+    │   ├── event_source.py
     │   ├── nfc_reader.py
     │   ├── button_input.py
     │   ├── feedback_output.py
@@ -222,6 +294,8 @@ tests/
 ├── application/
 ├── domain/
 ├── event_bus/
+├── input/
+├── ports/
 ├── adapters/
 └── integration/
 ```
@@ -469,36 +543,118 @@ The state does not need to be written to the SD card in version 1.
 
 ---
 
-## 9. Core use cases
+## 9. Global input serialization
 
-### 9.1 Known NFC card
+All user input sources share a single `InputCoordinator`.
+
+Before publishing a domain input event, an adapter passes the event to the coordinator.
+
+The coordinator atomically attempts to acquire a non-blocking global lock.
+
+If the lock cannot be acquired:
+
+- the input is discarded;
+- the input is not queued;
+- the input is not replayed later;
+- no event is published.
+
+If the lock is acquired:
+
+1. the coordinator publishes the event through the synchronous `EventBus`;
+2. all registered handlers execute synchronously;
+3. the lock remains held until all handlers have completed;
+4. the lock is released in a `finally` block.
+
+Conceptual implementation:
+
+```python
+class InputCoordinator:
+    def publish(self, event: Event) -> bool:
+        if not self._lock.acquire(blocking=False):
+            return False
+
+        try:
+            self._event_bus.publish(event)
+            return True
+        finally:
+            self._lock.release()
+```
+
+This design guarantees:
+
+- only one user input command is processed at a time;
+- all additional button and NFC input is ignored during command execution;
+- no command backlog develops;
+- the `PlayerController` is not invoked concurrently by user input;
+- a failure or exception does not permanently lock input.
+
+Existing audio playback normally continues while a command is being processed because playback is handled by the Spotify or audio backend rather than by the input thread.
+
+External operations must use finite timeouts so that an unavailable Spotify service cannot keep input disabled indefinitely.
+
+### 9.1 Command completion boundary
+
+The input lock remains active until the command has reached a defined completion state.
+
+For NFC playback requests, completion means one of:
+
+- playback has been confirmed as started;
+- playback startup has failed;
+- the operation has timed out.
+
+For button commands, completion means one of:
+
+- the requested action has completed successfully;
+- the action has failed;
+- the operation has timed out.
+
+A Spotify adapter must therefore not return immediately after merely sending a command if playback confirmation is required by the use case.
+
+---
+
+## 10. Core use cases
+
+### 10.1 Known NFC card
 
 ```text
 NFC reader detects card
-→ NfcCardDetected(card_id)
+→ NFC adapter suppresses duplicates
+→ InputCoordinator tries to acquire input lock
+→ lock acquired
+→ NfcCardDetected(card_id) published
 → PlayerController looks up the card
 → mapping found
 → SpotifyPlayer.play_context(uri)
-→ PlaybackStarted
-→ state becomes PLAYING
-→ feedback indicates playback
+→ wait for playback confirmation, failure, or timeout
+→ PlaybackStarted or PlaybackFailed
+→ feedback updated
+→ EventBus handling completes
+→ input lock released
 ```
 
-### 9.2 Unknown NFC card
+While the lock is held:
+
+- additional NFC cards are ignored;
+- button presses are ignored;
+- existing audio playback continues until the new playback starts.
+
+### 10.2 Unknown NFC card
 
 ```text
 NFC reader detects card
+→ InputCoordinator acquires input lock
 → NfcCardDetected(card_id)
 → no mapping found
 → no Spotify command
 → warning is logged
 → short error feedback
 → existing playback and state remain unchanged
+→ input lock released
 ```
 
 An unknown card must not stop currently playing content.
 
-### 9.3 Card remains on reader
+### 10.3 Card remains on reader
 
 ```text
 card detected
@@ -516,47 +672,58 @@ card presented again
 
 Duplicate suppression belongs in the NFC adapter.
 
-### 9.4 Play/Pause
+### 10.4 Play/Pause
 
 ```text
 PlayPausePressed
+→ InputCoordinator acquires input lock
 → if state is PLAYING: pause
 → if state is PAUSED: resume
 → if no content has been selected: no playback action
+→ wait for success, failure, or timeout
+→ input lock released
 ```
 
 Pressing Play/Pause before content has been selected must not start random or previously remembered content.
 
-### 9.5 Next track
+### 10.5 Next track
 
 ```text
 NextTrackPressed
+→ InputCoordinator acquires input lock
 → SpotifyPlayer.next_track()
+→ wait for success, failure, or timeout
 → optional TrackChanged event
 → short confirmation feedback
+→ input lock released
 ```
 
 If no playback is active, the command may be ignored and logged.
 
-### 9.6 Previous track
+### 10.6 Previous track
 
 ```text
 PreviousTrackPressed
+→ InputCoordinator acquires input lock
 → SpotifyPlayer.previous_track()
+→ wait for success, failure, or timeout
 → optional TrackChanged event
 → short confirmation feedback
+→ input lock released
 ```
 
 The exact restart-versus-previous behavior is delegated to the Spotify backend.
 
-### 9.7 Volume increase
+### 10.7 Volume increase
 
 ```text
 VolumeUpPressed
+→ InputCoordinator acquires input lock
 → current volume + configured step
 → clamp to configured maximum
 → SpotifyPlayer or AudioOutput sets volume
 → VolumeChanged
+→ input lock released
 ```
 
 Recommended defaults:
@@ -566,14 +733,16 @@ step: 5 %
 maximum: 70 %
 ```
 
-### 9.8 Volume decrease
+### 10.8 Volume decrease
 
 ```text
 VolumeDownPressed
+→ InputCoordinator acquires input lock
 → current volume - configured step
 → clamp to configured minimum
 → SpotifyPlayer or AudioOutput sets volume
 → VolumeChanged
+→ input lock released
 ```
 
 Recommended minimum:
@@ -584,20 +753,22 @@ minimum: 0 %
 
 A volume of 0 % means muted, not paused.
 
-### 9.9 Spotify unavailable
+### 10.9 Spotify unavailable
 
 ```text
 input event occurs
+→ InputCoordinator acquires input lock
 → controller requests Spotify action
-→ Spotify command fails
+→ Spotify command fails or times out
 → PlaybackFailed or SpotifyUnavailable
 → state becomes OFFLINE
 → error feedback
 → application keeps running
-→ connection is retried later
+→ input lock released
+→ connection may be retried later
 ```
 
-### 9.10 Hardware failure
+### 10.10 Hardware failure
 
 Recoverable example:
 
@@ -619,7 +790,7 @@ NFC reader fails and no alternate input exists
 
 ---
 
-## 10. Event bus
+## 11. Event bus
 
 Version 1 uses a simple synchronous event bus.
 
@@ -628,33 +799,45 @@ Responsibilities:
 - register subscribers by event type;
 - publish events to subscribers;
 - isolate publishers from subscribers;
-- log subscriber failures;
+- preserve deterministic subscriber order;
 - avoid silently losing errors.
 
 The event bus should not contain domain decisions.
 
-Blocking hardware readers may run in background threads and publish events into the bus.
+Blocking hardware readers may run in background threads and submit events through the `InputCoordinator`.
 
 The initial architecture deliberately avoids making the whole application asynchronous. `asyncio` may be introduced later if real requirements justify it.
 
+The event bus invokes subscribers in the same thread that publishes the event.
+
+For user input events, the `InputCoordinator` ensures that only one such dispatch is active at a time.
+
 ---
 
-## 11. Concurrency
+## 12. Concurrency
 
 Recommended initial model:
 
 - main process owns application lifecycle;
 - synchronous event dispatch;
+- global non-blocking input lock in the `InputCoordinator`;
 - dedicated background thread for blocking NFC reads if necessary;
 - GPIO callbacks or a small input thread for buttons;
-- Spotify calls remain synchronous initially unless latency causes input problems;
+- Spotify calls remain synchronous initially;
+- external operations use finite timeouts;
 - clean stop signals for all worker threads.
 
-Shared mutable state should be minimized. State changes should be centralized through the application controller.
+Shared mutable state should be minimized.
+
+State changes should be centralized through the application controller.
+
+User-input handlers must not execute concurrently.
+
+System or lifecycle events that do not originate from the `InputCoordinator` may require separate concurrency review when introduced.
 
 ---
 
-## 12. Configuration
+## 13. Configuration
 
 Configuration is loaded at startup from a read-only file.
 
@@ -685,7 +868,7 @@ Secrets must not be committed to Git.
 
 ---
 
-## 13. Feedback and LEDs
+## 14. Feedback and LEDs
 
 The controller requests semantic feedback and does not set GPIO pins directly.
 
@@ -710,6 +893,7 @@ Suggested initial patterns:
 | `PAUSED` | Short periodic blink |
 | `OFFLINE` | Slow double blink |
 | `ERROR` | Fast blink |
+| Input locked / command running | Optional busy indication |
 | NFC accepted | Short confirmation |
 | Unknown NFC card | Short error signal |
 | Volume changed | Very short confirmation |
@@ -718,7 +902,7 @@ Colors remain hardware-dependent and will be decided when the LED hardware is se
 
 ---
 
-## 14. Hardware abstraction
+## 15. Hardware abstraction
 
 Hardware-specific dependencies must be confined to adapters.
 
@@ -736,9 +920,11 @@ Button debouncing belongs in the GPIO adapter.
 
 NFC duplicate suppression belongs in the NFC adapter.
 
+Input serialization does not belong in individual adapters. It belongs in the shared `InputCoordinator`.
+
 ---
 
-## 15. Spotify integration boundary
+## 16. Spotify integration boundary
 
 The `SpotifyPlayer` port should expose application-oriented operations rather than raw API calls.
 
@@ -751,15 +937,19 @@ Required capabilities:
 - skip backward;
 - set or retrieve volume where supported;
 - report availability;
-- translate backend failures into defined application errors or events.
+- confirm completion where required by the use case;
+- translate backend failures into defined application errors or events;
+- apply finite timeouts to blocking operations.
 
 The adapter may later use Spotify Connect, a local playback service, or another mechanism without changing the controller.
+
+For NFC-triggered playback, `play_context()` or an equivalent application-oriented operation must not signal completion until playback has started, failed, or timed out.
 
 The exact Spotify playback implementation remains a separate technical decision.
 
 ---
 
-## 16. Windows development and fake adapters
+## 17. Windows development and fake adapters
 
 Development must be possible without Raspberry Pi hardware.
 
@@ -768,7 +958,9 @@ Fake adapters should support:
 - manually simulating NFC cards;
 - manually simulating button presses;
 - recording Spotify commands;
-- simulating failures and offline states;
+- simulating delayed command completion;
+- simulating failures and timeouts;
+- simulating input discarded while the coordinator is locked;
 - collecting requested feedback;
 - deterministic automated tests.
 
@@ -776,14 +968,16 @@ Example:
 
 ```text
 FakeNfcReader.emit_card("04A1B2C3")
-→ same NfcCardDetected event as the Raspberry Pi adapter
+→ InputCoordinator
+→ NfcCardDetected
+→ same application flow as the Raspberry Pi adapter
 ```
 
 The application controller and domain logic should run unchanged on Windows and Raspberry Pi.
 
 ---
 
-## 17. Future ESP32 extension
+## 18. Future ESP32 extension
 
 A future ESP32 may read buttons or NFC and send neutral input messages to the Raspberry Pi.
 
@@ -797,13 +991,15 @@ Example remote message:
 }
 ```
 
-An ESP32 adapter on the Raspberry Pi translates the message into the same internal event used by local GPIO.
+An ESP32 adapter on the Raspberry Pi translates the message into the same internal event used by local GPIO and submits it through the same `InputCoordinator`.
 
 No application or controller redesign should be required.
 
+Inputs from the ESP32 are subject to the same global input lock as local NFC and button inputs.
+
 ---
 
-## 18. Error handling principles
+## 19. Error handling principles
 
 - Temporary network or Spotify failures must not terminate the application.
 - Recoverable failures should be logged and retried where sensible.
@@ -812,10 +1008,13 @@ No application or controller redesign should be required.
 - Invalid startup configuration may prevent transition to `READY`.
 - Errors exposed to the controller should use defined types rather than backend-specific exceptions.
 - Logs should include enough context for diagnosis without exposing credentials.
+- The `InputCoordinator` must release its lock after success, failure, timeout, or exception.
+- External operations must use finite timeouts.
+- Inputs received while the coordinator is locked are intentionally discarded.
 
 ---
 
-## 19. Logging
+## 20. Logging
 
 Logging should cover:
 
@@ -824,7 +1023,10 @@ Logging should cover:
 - detected NFC card IDs;
 - resolved playback targets;
 - button events;
+- discarded input while locked;
+- input lock acquisition and release where useful;
 - playback commands;
+- command timeouts;
 - state changes;
 - hardware availability;
 - network and Spotify availability;
@@ -837,7 +1039,7 @@ Log persistence is optional. A read-only system may use console or volatile logs
 
 ---
 
-## 20. Testing strategy
+## 21. Testing strategy
 
 ### Unit tests
 
@@ -850,6 +1052,11 @@ Unit tests should cover:
 - state transitions;
 - recoverable and fatal failures;
 - event bus dispatch;
+- input coordinator locking;
+- input discard while busy;
+- lock release after successful handling;
+- lock release after exceptions;
+- lock release after timeouts;
 - controller behavior with fake ports.
 
 ### Adapter tests
@@ -868,14 +1075,22 @@ Integration tests should wire:
 
 - real controller;
 - real event bus;
+- real input coordinator;
 - fake input adapters;
 - fake Spotify and feedback adapters.
 
 This provides confidence in complete use-case flows without requiring physical hardware.
 
+Integration tests should verify that:
+
+- a second input is discarded while a command is running;
+- no queued input is replayed afterward;
+- existing playback state is preserved until a new command completes;
+- input becomes available again after success, failure, or timeout.
+
 ---
 
-## 21. Version 1 scope
+## 22. Version 1 scope
 
 ### Included
 
@@ -888,6 +1103,9 @@ This provides confidence in complete use-case flows without requiring physical h
 - configurable volume limits;
 - LED or equivalent status feedback;
 - controlled error handling;
+- global input serialization;
+- discarded input while commands are running;
+- finite command timeouts;
 - logging;
 - fake adapters for Windows;
 - Raspberry Pi adapters for real hardware;
@@ -904,13 +1122,15 @@ This provides confidence in complete use-case flows without requiring physical h
 - battery-level display;
 - automatic power-off;
 - ESP32 communication;
+- queued input commands;
+- replay of ignored input;
 - complex playback queues;
 - voice control;
 - dynamic Spotify search.
 
 ---
 
-## 22. Architecture decisions
+## 23. Architecture decisions
 
 The initial architecture establishes these decisions:
 
@@ -920,26 +1140,40 @@ The initial architecture establishes these decisions:
 4. Raspberry Pi-specific code exists only in adapters.
 5. Fake adapters are provided for Windows development and tests.
 6. The event bus is synchronous in version 1.
-7. Blocking hardware readers may use dedicated background threads.
-8. Application state is stored only in memory.
-9. Configuration is loaded from a file during startup.
-10. Unknown NFC cards do not change current playback.
-11. Volume is limited by configurable minimum and maximum values.
-12. Network or Spotify outages do not terminate the application.
-13. Runtime writes to the SD card are not required for version 1.
-14. An ESP32 can later be added as an input adapter without redesigning the controller.
-15. A separate command bus is not required initially.
+7. Input adapters are push-based lifecycle-controlled event sources.
+8. Blocking hardware readers may use dedicated background threads.
+9. All user input passes through one shared `InputCoordinator`.
+10. The coordinator uses an atomic non-blocking lock.
+11. Only one user input command is processed at a time.
+12. Additional input while a command is running is discarded.
+13. Ignored input is not queued or replayed.
+14. Existing audio playback normally continues during command handling.
+15. Input remains locked until the command succeeds, fails, or times out.
+16. External operations use finite timeouts.
+17. Application state is stored only in memory.
+18. Configuration is loaded from a file during startup.
+19. Unknown NFC cards do not change current playback.
+20. Volume is limited by configurable minimum and maximum values.
+21. Network or Spotify outages do not terminate the application.
+22. Runtime writes to the SD card are not required for version 1.
+23. An ESP32 can later be added as an input adapter without redesigning the controller.
+24. A separate command bus is not required initially.
+25. Bootstrap owns event-source lifecycle.
+26. The `PlayerController` never polls or starts hardware.
 
 ---
 
-## 23. Open technical decisions
+## 24. Open technical decisions
 
 The following questions remain intentionally open:
 
 - exact NFC reader model and communication protocol;
 - exact Spotify playback mechanism;
+- exact method for confirming playback start;
+- timeout values for Spotify commands;
 - whether volume is controlled through Spotify, the local audio stack, or both;
 - exact LED hardware and color mapping;
+- whether a busy LED indication is required;
 - configuration format, such as YAML, TOML, or JSON;
 - retry timing and backoff strategy;
 - exact thread model for the selected NFC library;
@@ -950,7 +1184,7 @@ These decisions should be made when the relevant hardware or implementation work
 
 ---
 
-## 24. Initial implementation order
+## 25. Initial implementation order
 
 Recommended sequence:
 
@@ -958,14 +1192,15 @@ Recommended sequence:
 2. player state;
 3. synchronous event bus;
 4. port interfaces;
-5. fake adapters;
-6. PlayerController;
-7. unit and integration tests;
-8. configuration loader and validation;
-9. logging and application bootstrap;
-10. Raspberry Pi button adapter;
-11. Raspberry Pi NFC adapter;
-12. feedback/LED adapter;
-13. Spotify adapter;
-14. audio integration;
-15. target-device integration and system service setup.
+5. input coordinator;
+6. fake adapters;
+7. PlayerController;
+8. unit and integration tests;
+9. configuration loader and validation;
+10. logging and application bootstrap;
+11. Raspberry Pi button adapter;
+12. Raspberry Pi NFC adapter;
+13. feedback/LED adapter;
+14. Spotify adapter;
+15. audio integration;
+16. target-device integration and system service setup.
