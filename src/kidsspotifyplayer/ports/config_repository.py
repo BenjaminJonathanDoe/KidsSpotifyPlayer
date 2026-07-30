@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from kidsspotifyplayer.domain.models import PlaybackTarget
+
 
 @runtime_checkable
 class ConfigRepository(Protocol):
-    """Port for loading and storing configuration values."""
+    """Port for resolving card IDs to playback targets."""
 
-    def load(self) -> dict[str, object]:
-        """Load the current configuration as a dictionary."""
-
-    def save(self, config: dict[str, object]) -> None:
-        """Persist a configuration dictionary."""
+    def find_playback_target(self, card_id: str) -> PlaybackTarget | None:
+        """Resolve a card identifier to a playback target if configured."""
