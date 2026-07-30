@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
+from kidsspotifyplayer.domain.models import PlaybackTarget
 from kidsspotifyplayer.ports import (
     AudioOutput,
     ButtonInput,
@@ -17,13 +18,10 @@ from kidsspotifyplayer.ports import (
 
 
 class FakeSpotifyPlayer:
-    def play_context(self, uri: str) -> None:
-        self._last_uri = uri
+    def play_context(self, target: PlaybackTarget) -> None:
+        self._last_target = target
 
-    def pause(self) -> None:
-        return None
-
-    def resume(self) -> None:
+    def toggle_play_pause(self) -> None:
         return None
 
     def next_track(self) -> None:
@@ -32,12 +30,14 @@ class FakeSpotifyPlayer:
     def previous_track(self) -> None:
         return None
 
-    def set_volume(self, volume_percent: int) -> None:
-        self._last_volume = volume_percent
+    def volume_up(self) -> None:
+        return None
+
+    def volume_down(self) -> None:
+        return None
 
     def __init__(self) -> None:
-        self._last_uri: str | None = None
-        self._last_volume: int | None = None
+        self._last_target: PlaybackTarget | None = None
 
 
 class FakeFeedbackOutput:
@@ -52,10 +52,7 @@ class FakeFeedbackOutput:
 
 
 class FakeConfigRepository:
-    def load(self) -> dict[str, object]:
-        return {}
-
-    def save(self, config: dict[str, object]) -> None:
+    def find_playback_target(self, card_id: str) -> PlaybackTarget | None:
         return None
 
 
