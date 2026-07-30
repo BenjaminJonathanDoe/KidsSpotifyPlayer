@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
+from kidsspotifyplayer.adapters.config.json_config_repository import JSONConfigRepository
 from kidsspotifyplayer.domain.models import PlaybackTarget
 from kidsspotifyplayer.ports import (
     AudioOutput,
@@ -80,10 +81,14 @@ class FakeAudioOutput:
         return None
 
 
-def test_protocols_are_structurally_satisfied() -> None:
+def test_protocols_are_structurally_satisfied(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"cards": {"04A1B2C3": {"uri": "spotify:playlist:123456"}}}', encoding="utf-8")
+
     assert isinstance(FakeSpotifyPlayer(), SpotifyPlayer)
     assert isinstance(FakeFeedbackOutput(), FeedbackOutput)
     assert isinstance(FakeConfigRepository(), ConfigRepository)
+    assert isinstance(JSONConfigRepository(config_path), ConfigRepository)
     assert isinstance(FakeNfcReader(), NfcReader)
     assert isinstance(FakeButtonInput(), ButtonInput)
     assert isinstance(FakeAudioOutput(), AudioOutput)
