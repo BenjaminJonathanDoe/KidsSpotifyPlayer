@@ -53,7 +53,7 @@ def test_repository_uses_in_memory_data_after_file_changes(tmp_path: Path) -> No
 
 def test_lookup_normalizes_card_ids(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
-    write_config(config_path, {"cards": {" 04A1B2C3 ": {"uri": "spotify:playlist:123456"}}})
+    write_config(config_path, {"cards": {" 04a1b2c3 ": {"uri": "spotify:playlist:123456"}}})
 
     repository = JSONConfigRepository(config_path)
 
@@ -63,6 +63,29 @@ def test_lookup_normalizes_card_ids(tmp_path: Path) -> None:
     assert repository.find_playback_target(" 04A1B2C3 ") == PlaybackTarget(
         uri="spotify:playlist:123456"
     )
+
+
+def test_normalization_preserves_separators_and_distinguishes_formats(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    write_config(
+        config_path,
+        {
+            "cards": {
+                "04:A1:B2:C3": {"uri": "spotify:playlist:123456"},
+                "04-A1-B2-C3": {"uri": "spotify:album:987654"},
+            }
+        },
+    )
+
+    repository = JSONConfigRepository(config_path)
+
+    assert repository.find_playback_target("04:a1:b2:c3") == PlaybackTarget(
+        uri="spotify:playlist:123456"
+    )
+    assert repository.find_playback_target("04-a1-b2-c3") == PlaybackTarget(
+        uri="spotify:album:987654"
+    )
+    assert repository.find_playback_target("04A1B2C3") is None
 
 
 def test_missing_file_fails_construction(tmp_path: Path) -> None:

@@ -62,4 +62,4 @@ class JSONConfigRepository(ConfigRepository):
     def _normalize_card_id(self, card_id: Any) -> str:
         if not isinstance(card_id, str):
             raise ValueError("Configuration card ID must be a non-empty string")
-        return card_id.strip().lower()
+        return card_id.strip().upper()
