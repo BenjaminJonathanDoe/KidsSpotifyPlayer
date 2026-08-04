@@ -94,6 +94,80 @@ def test_known_nfc_card_resolves_to_expected_spotify_context() -> None:
     assert feedback.errors == []
 
 
+def test_same_playback_target_is_not_started_twice() -> None:
+    target = PlaybackTarget(uri="spotify:playlist:a")
+    config = FakeConfigRepository({"A": target})
+    spotify = FakeSpotifyPlayer()
+    feedback = FakeFeedbackOutput()
+    bus = EventBus()
+    controller = PlayerController(bus, spotify, config, feedback)
+
+    controller.on_nfc_card_detected(NfcCardDetected(card_id="A"))
+    controller.on_nfc_card_detected(NfcCardDetected(card_id="A"))
+
+    assert config.requested_card_ids == ["A", "A"]
+    assert spotify.calls == [("play_context", target)]
+    assert feedback.errors == []
+
+
+def test_different_playback_target_starts_new_playback() -> None:
+    target_a = PlaybackTarget(uri="spotify:playlist:a")
+    target_b = PlaybackTarget(uri="spotify:playlist:b")
+    config = FakeConfigRepository(
+        {
+            "A": target_a,
+            "B": target_b,
+        }
+    )
+    spotify = FakeSpotifyPlayer()
+    feedback = FakeFeedbackOutput()
+    bus = EventBus()
+    controller = PlayerController(bus, spotify, config, feedback)
+
+    controller.on_nfc_card_detected(NfcCardDetected(card_id="A"))
+    controller.on_nfc_card_detected(NfcCardDetected(card_id="B"))
+
+    assert spotify.calls == [
+        ("play_context", target_a),
+        ("play_context", target_b),
+    ]
+    assert feedback.errors == []
+
+
+def test_unknown_card_does_not_replace_current_playback_target() -> None:
+    target_a = PlaybackTarget(uri="spotify:playlist:a")
+    config = FakeConfigRepository({"A": target_a})
+    spotify = FakeSpotifyPlayer()
+    feedback = FakeFeedbackOutput()
+    bus = EventBus()
+    controller = PlayerController(bus, spotify, config, feedback)
+
+    controller.on_nfc_card_detected(NfcCardDetected(card_id="A"))
+    controller.on_nfc_card_detected(NfcCardDetected(card_id="UNKNOWN"))
+    controller.on_nfc_card_detected(NfcCardDetected(card_id="A"))
+
+    assert spotify.calls == [("play_context", target_a)]
+    assert feedback.errors == ["Unknown card: UNKNOWN"]
+
+
+def test_failed_playback_is_not_remembered_as_current_target() -> None:
+    target = PlaybackTarget(uri="spotify:playlist:a")
+    config = FakeConfigRepository({"A": target})
+    spotify = FakeSpotifyPlayer()
+    spotify.raise_on = "play_context"
+    feedback = FakeFeedbackOutput()
+    bus = EventBus()
+    controller = PlayerController(bus, spotify, config, feedback)
+
+    with pytest.raises(RuntimeError, match="boom:play_context"):
+        controller.on_nfc_card_detected(NfcCardDetected(card_id="A"))
+
+    spotify.raise_on = None
+    controller.on_nfc_card_detected(NfcCardDetected(card_id="A"))
+
+    assert spotify.calls == [("play_context", target)]
+
+
 def test_unknown_nfc_card_does_not_call_spotify_and_triggers_feedback() -> None:
     bus = EventBus()
     spotify = FakeSpotifyPlayer()
@@ -120,7 +194,8 @@ def test_unknown_nfc_card_does_not_call_spotify_and_triggers_feedback() -> None:
     ],
 )
 def test_button_events_call_expected_spotify_methods(
-    event: type[object], expected_method: str
+    event: type[object],
+    expected_method: str,
 ) -> None:
     bus = EventBus()
     spotify = FakeSpotifyPlayer()
@@ -143,7 +218,12 @@ def test_repository_exceptions_propagate() -> None:
         def find_playback_target(self, card_id: str) -> PlaybackTarget | None:
             raise RuntimeError(f"boom:{card_id}")
 
-    controller = PlayerController(bus, spotify, ExplodingConfigRepository(), feedback)
+    controller = PlayerController(
+        bus,
+        spotify,
+        ExplodingConfigRepository(),
+        feedback,
+    )
     controller.register_handlers()
 
     with pytest.raises(RuntimeError, match="boom:card-1"):
@@ -155,7 +235,13 @@ def test_service_port_exceptions_propagate() -> None:
     spotify = FakeSpotifyPlayer()
     spotify.raise_on = "play_context"
     feedback = FakeFeedbackOutput()
-    config = FakeConfigRepository({"card-1": PlaybackTarget(uri="spotify:playlist:123")})
+    config = FakeConfigRepository(
+        {
+            "card-1": PlaybackTarget(
+                uri="spotify:playlist:123",
+            )
+        }
+    )
     controller = PlayerController(bus, spotify, config, feedback)
 
     controller.register_handlers()
