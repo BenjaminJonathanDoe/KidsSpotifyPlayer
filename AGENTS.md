@@ -1,306 +1,253 @@
-# AGENTS.md
+# KidsSpotifyPlayer - Engineering Guide
 
-# KidsSpotifyPlayer Engineering Handbook
-
-This repository is a small, synchronous, event-driven application for a child-friendly Spotify player. The architecture exists to keep application decisions independent from hardware, JSON, and external services.
-
-Treat this document as the canonical engineering guide for future implementations.
+> Architecture: see `docs/architecture.md`
+>
+> This document describes how contributors (human or AI) should work in this repository.
 
 ---
 
-# Project philosophy
+# 1. Project Goal
 
-The architecture is intentionally simple and explicit.
+KidsSpotifyPlayer is a Raspberry Pi Zero 2 W based Spotify player for children.
 
-- The application layer should make decisions, not talk to hardware or parse config files.
-- Ports define capabilities. Adapters translate those capabilities to concrete technologies.
-- Events are facts about what happened. They are immutable data, not behavior.
-- The controller contains application decisions such as resolving an NFC card to a playback target.
-- Configuration is hidden behind repositories so the rest of the application sees a stable interface, not JSON structures.
-- The system is built for deterministic behavior and easy testing on non-hardware platforms.
+The MVP interaction is intentionally simple:
+
+```text
+NFC card detected
+→ resolve playback target
+→ start Spotify playback
+→ playback continues after card removal
+```
+
+The architecture is deliberately modular so additional hardware (buttons, LEDs, ESP32, displays, etc.) can be added without changing the application layer.
 
 ---
 
-# Architecture
+# 2. Current MVP Scope
 
-The repository is organized into layers.
+Implemented:
 
-## Domain
-
-The domain layer contains stable, platform-independent concepts.
-
-Allowed:
-- domain events
-- domain models such as PlaybackTarget
-- enums and simple value objects
-- immutable data structures
-
-Must never depend on:
-- Raspberry Pi libraries
-- Spotify SDKs
-- JSON parsing
-- hardware adapters
-- infrastructure concerns
-
-## Application
-
-The application layer contains orchestration and decisions.
-
-The current application entry points are:
-- PlayerController
-- Application composition root
-
-Allowed:
-- interpreting domain events
-- calling ports
-- making application-level decisions
-- coordinating a synchronous flow of work
-
-Must never depend on:
-- GPIO, NFC hardware, LEDs, audio, or networking directly
-- JSON files
-- concrete adapter implementations
-
-## Ports
-
-Ports are protocols that describe capabilities the application needs.
-
-Examples:
-- SpotifyPlayer
-- FeedbackOutput
-- ConfigRepository
-
-Rules:
-- ports describe behavior, not implementation
-- ports should stay narrow and focused
-- application code depends on ports, not concrete classes
-
-## Adapters
-
-Adapters implement ports for a specific technology.
-
-Examples:
-- JSONConfigRepository for configuration
-- future Spotify adapters
-- future NFC or button adapters
-
-Rules:
-- adapters translate between external protocols and the domain/application contract
-- adapters may parse JSON, open files, talk to hardware, or wrap SDKs
-- adapters must not contain business logic
-- adapters must not make application decisions beyond translation
-
-## Infrastructure
-
-Infrastructure owns technical concerns and wiring.
-
-Current examples:
+- Domain models
+- Domain events
 - EventBus
 - InputCoordinator
-- Application composition root
+- PlayerController
+- JSONConfigRepository
+- SpotifyWebApiPlayer
+- Composition root
+- Unit tests
+- Integration tests
+- Acceptance tests
 
-Rules:
-- infrastructure is responsible for constructing and linking objects
-- infrastructure keeps the application synchronous and deterministic
-- infrastructure should not contain business rules
+Still required:
 
-## Composition root
+- PN532 NFC adapter over SPI
+- Spotify API runtime client
+- bootstrap.py
+- main.py
+- Raspberry Pi deployment
+- End-to-end hardware test
 
-The composition root is the Application class.
+Not part of MVP:
 
-It is responsible for:
-- constructing the event bus
-- constructing the input coordinator
-- constructing the config repository
-- constructing the controller
-- registering handlers
-- wiring concrete implementations supplied by the caller
-
-The composition root owns the dependency graph for the current slice of the application.
-
----
-
-# Dependency direction
-
-Keep dependencies flowing inward.
-
-- Domain is the core. It should not depend on application, ports, or adapters.
-- Application depends on domain and ports.
-- Adapters implement ports and may depend on domain, but they should not be depended on by domain.
-- Infrastructure wires the graph together.
-
-In short:
-
-Domain <- Application <- Ports <- Adapters
-
-Infrastructure sits above this graph and composes it.
+- Buttons
+- LEDs
+- Display
+- Battery management
+- ESP32 communication
 
 ---
 
-# Design rules
+# 3. Repository Structure
 
-Follow these rules in every change.
+```
+src/
+    domain/
+    application/
+    ports/
+    adapters/
+    event_bus/
+    input/
 
-- Controllers never know JSON.
-- Repositories never expose dictionaries as part of the application contract.
-- Events are immutable facts. They do not contain behavior.
-- Ports describe capabilities. They do not describe infrastructure details.
-- Adapters translate protocols. They do not make business decisions.
-- Application owns orchestration.
-- Infrastructure owns technical concerns.
-- No business logic belongs in adapters.
-- No hardware knowledge belongs in application.
-- No Spotify SDK or hardware integration should appear outside adapters.
-- Keep the EventBus synchronous.
-- Do not introduce async unless the task explicitly requires it.
-- Avoid hidden magic, global state, and service locators.
+tests/
+    domain/
+    application/
+    adapters/
+    acceptance/
+```
 
----
-
-# Testing strategy
-
-Tests should reflect the architecture.
-
-## Unit tests
-
-Use unit tests for small, focused behavior.
-
-Examples:
-- domain models and events
-- event bus dispatch
-- input coordinator serialization
-- repository validation logic
-
-## Integration tests
-
-Use integration tests when multiple components must work together.
-
-Examples:
-- Application wiring with real repository and controller
-- event flow through the public input coordinator
-
-## Acceptance tests
-
-Use acceptance tests for the currently implemented application slice from a public input event to an observable port call.
-
-These tests should:
-- exercise the real application graph
-- use public entry points
-- verify observable behavior only
-- avoid inspecting private state or helper methods
-
-Prefer test-first additions for new behavior.
+Tests mirror the production structure.
 
 ---
 
-# Git workflow
+# 4. Architecture Rules
 
-Work on a dedicated feature branch.
+Always follow `docs/architecture.md`.
 
-Flow:
+Important rules:
 
-main
-↓
-feature branch
-↓
-implement
-↓
-review
-↓
-tests
-↓
-merge with --no-ff
-↓
-main stays green
+- Domain never depends on infrastructure.
+- Application never imports adapters.
+- Ports define capabilities only.
+- Adapters implement ports.
+- Infrastructure wires dependencies.
 
-Rules:
-- do not work directly on main
-- keep changes focused and related to the task
-- run the full test suite before finishing
-- review diffs for unrelated changes
-- do not push or merge unless explicitly requested
-
----
-
-# Code style
-
-Follow the existing conventions in the repository.
-
-- Python 3.11 syntax
-- type hints everywhere
-- dataclasses for immutable domain data
-- Protocols for ports
-- small modules and small classes
-- explicit, readable names
-- no premature abstractions
-- prefer standard library over new dependencies
-- prefer immutable values where practical
-- avoid clever code and hidden side effects
-
-Naming:
-- modules and functions use snake_case
-- classes use PascalCase
-- events and models use descriptive names
-
-Keep the implementation simple enough that a new engineer can read it quickly.
-
----
-
-# Future features
-
-New hardware should be added as an adapter implementing an existing port.
-
-Examples:
-- Spotify becomes a Spotify adapter implementing SpotifyPlayer
-- NFC becomes an NFC adapter implementing the relevant input port
-- Buttons become button adapters publishing neutral events
-- LEDs become a feedback adapter
-- Audio becomes an audio-output adapter
-- Display, if added later, becomes another adapter behind a port
-
-A concrete Spotify example of the layering is:
+Responsibilities:
 
 PlayerController
-↓
-SpotifyPlayer port
-↓
-SpotifyWebApiPlayer adapter
-↓
-Spotify API client
-↓
-librespot device on the Pi
 
-The application talks to the port. The adapter translates that contract to the concrete Spotify stack. The controller never depends on the Spotify SDK or the Pi device directly.
+- application decisions
+- playback selection
+- current target suppression
 
-Do not place hardware knowledge in the application layer.
+JSONConfigRepository
+
+- JSON parsing
+- configuration validation
+- PlaybackTarget creation
+
+SpotifyWebApiPlayer
+
+- Spotify state interpretation
+- playback confirmation
+- volume handling
+
+PN532 adapter
+
+- NFC hardware
+- duplicate hardware read suppression
+- UID normalization
+
+Never move responsibilities between layers without explicit approval.
 
 ---
 
-# Non-goals
+# 5. Development Workflow
 
-The project deliberately avoids:
+For every change:
+
+1. Read existing code.
+2. Understand surrounding tests.
+3. Decide which layer owns the change.
+4. Explain your reasoning briefly.
+5. Write failing tests first whenever practical.
+6. Implement the smallest possible change.
+7. Run targeted tests.
+8. Run the full test suite.
+9. Review the diff.
+10. Stop.
+
+Never commit automatically.
+
+Never merge automatically.
+
+Wait for user review.
+
+---
+
+# 6. Testing Rules
+
+Tests must be:
+
+- deterministic
+- isolated
+- repeatable
+- hardware independent
+
+Prefer:
+
+- fake clients
+- injected clocks
+- injected dependencies
+
+Avoid:
+
+- real sleep()
+- real network requests
+- Raspberry Pi hardware
+- Spotify servers
+
+Acceptance tests should exercise public interfaces instead of implementation details.
+
+---
+
+# 7. Coding Standards
+
+Prefer:
+
+- constructor injection
+- composition
+- immutable models
+- explicit dependencies
+- small classes
+- descriptive names
+
+Avoid:
+
+- globals
 - singletons
-- global state
 - service locators
 - dependency injection frameworks
-- hidden magic
-- async unless clearly required
-- polling inside controllers
-- business logic inside adapters
+- speculative abstractions
+
+Fail fast whenever configuration is invalid.
 
 ---
 
-# Implementation checklist
+# 8. Current Roadmap
 
-Before submitting code, verify all of the following:
+Priority order:
 
-- [ ] The change matches the existing architecture
-- [ ] The change stays in the correct layer
-- [ ] The public contract is preserved unless a real mismatch is being fixed
-- [ ] New behavior is covered by tests
-- [ ] Tests are written before or alongside the implementation
-- [ ] The full test suite passes
-- [ ] The diff is focused and free of unrelated edits
-- [ ] No accidental production changes slipped in
+1. PN532 NFC adapter
+2. Spotify runtime client
+3. bootstrap.py
+4. main.py
+5. Raspberry Pi integration
+6. Hardware validation
 
-If a requested change would force a major architectural shift, stop and explain the trade-off before implementing it.
+Only work on one roadmap item at a time unless instructed otherwise.
+
+---
+
+# 9. Before Implementing
+
+Before changing code, determine where the change belongs:
+
+- Domain
+- Application
+- Port
+- Adapter
+- Infrastructure
+- Tests
+
+If the requested change violates the architecture:
+
+Stop.
+
+Explain why.
+
+Do not start coding.
+
+---
+
+# 10. Things You Must Never Do
+
+Never:
+
+- redesign the architecture
+- rename packages
+- introduce asyncio
+- introduce dependency injection frameworks
+- introduce service locators
+- move responsibilities between layers
+- duplicate business logic
+- perform unnecessary refactoring
+- commit automatically
+- merge automatically
+- change architecture.md unless requested
+- add real sleeps to tests
+- add real network calls to tests
+
+Keep every change as small as possible.
+
+Optimize for maintainability over cleverness.
