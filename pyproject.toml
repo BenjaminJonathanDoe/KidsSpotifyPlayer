@@ -12,7 +12,9 @@ license = { file = "LICENSE" }
 authors = [
     { name = "BenjaminJonathanDoe" }
 ]
-dependencies = []
+dependencies = [
+    "spotipy>=2.24,<3",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
