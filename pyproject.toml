@@ -14,6 +14,7 @@ authors = [
 ]
 dependencies = [
     "spotipy>=2.24,<3",
+    "adafruit-circuitpython-pn532>=2.4,<3",
 ]
 
 [tool.setuptools]
