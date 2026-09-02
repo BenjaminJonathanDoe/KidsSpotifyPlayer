@@ -22,3 +22,5 @@ build/
 # Coverage (für später)
 .coverage
 htmlcov/
+
+AGENTS.md

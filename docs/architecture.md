@@ -344,6 +344,10 @@ Otherwise it raises `TimeoutError` after bounded polling.
 A concrete Spotify API client is still required for OAuth, token refresh, real Web API calls, and SDK response translation.
 The intended playback device is a local Spotify Connect receiver on the Raspberry Pi, likely provided by `librespot`.
 `librespot` process management remains outside application logic.
+
+External Spotify HTTP operations are bounded explicitly:
+- normal Spotify Web API requests use a 5-second timeout;
+- Spotify OAuth and token requests use a 10-second timeout.
 ---
 ## 13. Lifecycle and Concurrency
 The composition root constructs:
@@ -380,6 +384,10 @@ Version 1 uses:
 - a background thread only for blocking NFC reads if required;
 - synchronous Spotify commands;
 - finite external-operation timeouts.
+
+The `main_runtime` heartbeat supervises the in-process main loop. It is not an
+external process watchdog and cannot detect failures that stop the entire Python
+process from executing; service-level supervision remains systemd's responsibility.
 No application-wide `asyncio` architecture is required.
 ---
 ## 14. Error Handling

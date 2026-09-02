@@ -14,6 +14,7 @@ from kidsspotifyplayer.adapters.spotify.spotipy_api_client import (
 from kidsspotifyplayer.adapters.spotify.spotify_web_api_player import (
     SpotifyApiClient,
 )
+from kidsspotifyplayer.health import HealthRegistry, HealthStatus
 
 
 class RecordingSpotipyClient:
@@ -371,3 +372,41 @@ def test_constructor_rejects_none_or_non_spotipy_client(
 ) -> None:
     with pytest.raises(TypeError, match="client"):
         SpotipyApiClient(client)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectionError("connection lost"),
+        TimeoutError("request timed out"),
+    ],
+)
+def test_network_failures_update_spotify_health_and_propagate(
+    error: Exception,
+) -> None:
+    class FailingClient(RecordingSpotipyClient):
+        def start_playback(
+            self,
+            *,
+            device_id: str,
+            context_uri: str | None = None,
+        ) -> None:
+            del device_id, context_uri
+            raise error
+
+    registry = HealthRegistry()
+    adapter = SpotipyApiClient(
+        FailingClient(),
+        health_registry=registry,
+    )
+
+    with pytest.raises(type(error), match=str(error)):
+        adapter.start_playback(
+            device_id="device-123",
+            context_uri="spotify:playlist:abc",
+        )
+
+    health = registry.snapshot()["spotify_web_api"]
+    assert health.status is HealthStatus.UNHEALTHY
+    assert type(error).__name__ in (health.last_error or "")
+    assert registry.fatal_event.is_set()
