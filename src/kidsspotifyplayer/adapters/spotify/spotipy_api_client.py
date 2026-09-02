@@ -7,6 +7,12 @@ from kidsspotifyplayer.health import HealthRegistry
 T = TypeVar("T")
 
 
+def is_spotify_authentication_error(error: Exception) -> bool:
+    status = getattr(error, "http_status", None)
+    text = f"{type(error).__name__} {error}".lower()
+    return status in (401, 403) or "auth" in text or "token" in text
+
+
 @runtime_checkable
 class SpotipyClientProtocol(Protocol):
     def start_playback(
@@ -138,12 +144,13 @@ class SpotipyApiClient:
         except Exception as error:
             if self._health_registry is not None:
                 reason = f"{operation}: {type(error).__name__}: {error}"
-                self._health_registry.unhealthy("spotify_web_api", reason)
-                if self._is_authentication_error(error):
+                if is_spotify_authentication_error(error):
                     self._health_registry.unhealthy(
                         "spotify_authentication",
                         reason,
                     )
+                else:
+                    self._health_registry.unhealthy("spotify_web_api", reason)
             raise
 
         if self._health_registry is not None:
@@ -152,9 +159,3 @@ class SpotipyApiClient:
                 operation_succeeded=True,
             )
         return result
-
-    @staticmethod
-    def _is_authentication_error(error: Exception) -> bool:
-        status = getattr(error, "http_status", None)
-        text = f"{type(error).__name__} {error}".lower()
-        return status in (401, 403) or "auth" in text or "token" in text

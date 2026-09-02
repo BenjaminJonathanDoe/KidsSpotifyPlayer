@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from kidsspotifyplayer.adapters.spotify.spotipy_api_client import (
+    is_spotify_authentication_error,
+)
 from kidsspotifyplayer.health import HealthRegistry
+
+
+class SpotifyConnectDeviceUnavailableError(ValueError):
+    """The configured Connect target is absent from a valid device listing."""
 
 
 @runtime_checkable
@@ -16,6 +23,7 @@ def resolve_device_id(
     device_name: str,
     *,
     health_registry: HealthRegistry | None = None,
+    report_unavailable: bool = True,
 ) -> str:
     if not isinstance(device_name, str) or not device_name.strip():
         raise ValueError("device_name must be a non-empty string")
@@ -24,16 +32,18 @@ def resolve_device_id(
 
     if health_registry is not None:
         health_registry.register("spotify_web_api")
+        health_registry.register("spotify_authentication")
         health_registry.register("spotify_connect_target")
 
     try:
         response = client.devices()
     except Exception as error:
         if health_registry is not None:
-            health_registry.unhealthy(
-                "spotify_web_api",
-                f"device discovery: {type(error).__name__}: {error}",
-            )
+            reason = f"device discovery: {type(error).__name__}: {error}"
+            if is_spotify_authentication_error(error):
+                health_registry.unhealthy("spotify_authentication", reason)
+            else:
+                health_registry.unhealthy("spotify_web_api", reason)
         raise
     else:
         if health_registry is not None:
@@ -78,14 +88,14 @@ def resolve_device_id(
             return device_id.strip()
 
         reason = f"Spotify device '{normalized_device_name}' has no usable ID"
-        if health_registry is not None:
+        if health_registry is not None and report_unavailable:
             health_registry.unhealthy("spotify_connect_target", reason)
-        raise ValueError(reason)
+        raise SpotifyConnectDeviceUnavailableError(reason)
 
     reason = (
         f"No Spotify Connect device named "
         f"'{normalized_device_name}' was found"
     )
-    if health_registry is not None:
+    if health_registry is not None and report_unavailable:
         health_registry.unhealthy("spotify_connect_target", reason)
-    raise ValueError(reason)
+    raise SpotifyConnectDeviceUnavailableError(reason)
