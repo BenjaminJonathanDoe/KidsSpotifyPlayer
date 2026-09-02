@@ -5,7 +5,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class SpotifyDeviceClient(Protocol):
-    def current_user_devices(self) -> dict[str, Any]:
+    def devices(self) -> dict[str, Any]:
         ...
 
 
@@ -18,7 +18,7 @@ def resolve_device_id(
 
     normalized_device_name = device_name.strip()
 
-    response = client.current_user_devices()
+    response = client.devices()
 
     if not isinstance(response, dict):
         raise ValueError("Spotify device listing is malformed")

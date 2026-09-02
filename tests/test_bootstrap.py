@@ -25,10 +25,10 @@ class FakeSpotifyClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
 
-    def current_user_devices(self) -> dict[str, Any]:
+    def devices(self) -> dict[str, Any]:
         self.calls.append(
             (
-                "current_user_devices",
+                "devices",
                 None,
             )
         )
@@ -130,7 +130,7 @@ def test_build_runtime_wires_core_components(
 
     assert spotify_client.calls == [
         (
-            "current_user_devices",
+            "devices",
             None,
         )
     ]
