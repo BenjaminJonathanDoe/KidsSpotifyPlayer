@@ -11,7 +11,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 from kidsspotifyplayer.adapters.raspberry_pi.pn532_nfc_reader import (
     Pn532NfcReader,
 )
+from kidsspotifyplayer.adapters.spotify.spotipy_api_client import SpotipyApiClient
+from kidsspotifyplayer.bootstrap import supervise_runtime
 from kidsspotifyplayer.domain.events import NfcCardDetected
+from kidsspotifyplayer.health import HealthMonitor, HealthRegistry, HealthStatus
 from kidsspotifyplayer.ports import NfcReader
 
 
@@ -415,3 +418,116 @@ def test_adapter_uses_injected_client_without_real_hardware() -> None:
     )
 
     assert adapter._client is client
+
+
+def test_repeated_no_card_polls_keep_nfc_and_hardware_healthy() -> None:
+    registry = HealthRegistry()
+    adapter = Pn532NfcReader(
+        FakePn532Client([None, None, None]),
+        RecordingCoordinator(),
+        health_registry=registry,
+    )
+
+    adapter._poll_once()
+    adapter._poll_once()
+    adapter._poll_once()
+
+    snapshot = registry.snapshot()
+    assert snapshot["nfc_reader"].status is HealthStatus.HEALTHY
+    assert snapshot["pn532_hardware"].status is HealthStatus.HEALTHY
+    assert snapshot["nfc_reader"].stale_after_seconds == 5.0
+    assert snapshot["pn532_hardware"].stale_after_seconds == 5.0
+    assert not registry.fatal_event.is_set()
+
+
+def test_hardware_worker_failure_is_observable_and_fatal() -> None:
+    registry = HealthRegistry()
+    client = FakePn532Client()
+    client.exception = RuntimeError("transport failed")
+    adapter = Pn532NfcReader(
+        client,
+        RecordingCoordinator(),
+        health_registry=registry,
+    )
+
+    adapter.start()
+    assert registry.fatal_event.wait(timeout=1.0)
+    adapter.stop()
+
+    snapshot = registry.snapshot()
+    assert snapshot["pn532_hardware"].status is HealthStatus.UNHEALTHY
+    assert "transport failed" in (snapshot["pn532_hardware"].last_error or "")
+    assert snapshot["nfc_reader"].status is HealthStatus.HEALTHY
+
+
+def test_downstream_failure_cannot_leave_runtime_apparently_healthy() -> None:
+    class FailingSpotifyClient:
+        def start_playback(
+            self,
+            *,
+            device_id: str,
+            context_uri: str | None = None,
+        ) -> None:
+            del device_id, context_uri
+            raise ConnectionError("Spotify connection lost")
+
+        def pause_playback(self, *, device_id: str) -> None:
+            del device_id
+
+        def next_track(self, *, device_id: str) -> None:
+            del device_id
+
+        def previous_track(self, *, device_id: str) -> None:
+            del device_id
+
+        def current_playback(self) -> dict[str, object] | None:
+            return None
+
+        def volume(self, volume_percent: int, *, device_id: str) -> None:
+            del volume_percent, device_id
+
+    class SpotifyCoordinator:
+        def __init__(self, spotify: SpotipyApiClient) -> None:
+            self._spotify = spotify
+
+        def publish(self, event: NfcCardDetected) -> bool:
+            del event
+            self._spotify.start_playback(
+                device_id="device-123",
+                context_uri="spotify:playlist:abc",
+            )
+            return True
+
+    registry = HealthRegistry()
+    spotify = SpotipyApiClient(
+        FailingSpotifyClient(),
+        health_registry=registry,
+    )
+    adapter = Pn532NfcReader(
+        FakePn532Client([bytes([0x01])]),
+        SpotifyCoordinator(spotify),  # type: ignore[arg-type]
+        health_registry=registry,
+    )
+    monitor = HealthMonitor(registry)
+    monitor.start()
+
+    adapter.start()
+    assert registry.fatal_event.wait(timeout=1.0)
+
+    with pytest.raises(
+        RuntimeError,
+        match="critical runtime health failure: spotify_web_api",
+    ):
+        supervise_runtime(
+            {
+                "health_registry": registry,
+                "health_monitor": monitor,
+                "nfc_reader": adapter,
+            }
+        )
+
+    snapshot = registry.snapshot()
+    spotify_health = snapshot["spotify_web_api"]
+    assert spotify_health.status is HealthStatus.UNHEALTHY
+    assert "ConnectionError" in (spotify_health.last_error or "")
+    assert snapshot["nfc_reader"].status is HealthStatus.HEALTHY

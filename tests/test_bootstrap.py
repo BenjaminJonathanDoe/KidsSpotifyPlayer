@@ -4,9 +4,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from kidsspotifyplayer.bootstrap import build_runtime
+import kidsspotifyplayer.bootstrap as bootstrap
 
 
 class FakeNfcReader:
@@ -134,6 +137,7 @@ def test_build_runtime_wires_core_components(
             None,
         )
     ]
+    runtime["health_monitor"].stop()
 
 
 def test_build_runtime_can_use_explicit_device_id_without_discovery(
@@ -159,3 +163,33 @@ def test_build_runtime_can_use_explicit_device_id_without_discovery(
     assert runtime["spotify_player"] is not None
 
     assert spotify_client.calls == []
+    runtime["health_monitor"].stop()
+
+
+def test_spotipy_and_oauth_requests_have_explicit_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, dict[str, object]] = {}
+
+    class FakeSpotifyOAuth:
+        def __init__(self, **kwargs: object) -> None:
+            calls["oauth"] = kwargs
+
+    class FakeSpotify:
+        def __init__(self, **kwargs: object) -> None:
+            calls["spotify"] = kwargs
+
+    for name in (
+        "SPOTIFY_CLIENT_ID",
+        "SPOTIFY_CLIENT_SECRET",
+        "SPOTIFY_REDIRECT_URI",
+        "SPOTIFY_TOKEN_CACHE_PATH",
+    ):
+        monkeypatch.setenv(name, "configured")
+    monkeypatch.setattr(bootstrap, "SpotifyOAuth", FakeSpotifyOAuth)
+    monkeypatch.setattr(bootstrap.spotipy, "Spotify", FakeSpotify)
+
+    bootstrap._build_spotify_client()
+
+    assert calls["oauth"]["requests_timeout"] == 10
+    assert calls["spotify"]["requests_timeout"] == 5

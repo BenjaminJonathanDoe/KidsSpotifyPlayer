@@ -4,6 +4,7 @@ import threading
 from typing import Protocol, runtime_checkable
 
 from kidsspotifyplayer.domain.events import NfcCardDetected
+from kidsspotifyplayer.health import HealthRegistry
 from kidsspotifyplayer.input.coordinator import InputCoordinator
 
 
@@ -21,6 +22,7 @@ class Pn532NfcReader:
         *,
         read_timeout_seconds: float = 0.2,
         absent_reads_to_rearm: int = 2,
+        health_registry: HealthRegistry | None = None,
     ) -> None:
         self._validate_constructor_args(read_timeout_seconds, absent_reads_to_rearm)
         self._client = client
@@ -33,6 +35,16 @@ class Pn532NfcReader:
         self._present_card_id: str | None = None
         self._absence_count = 0
         self._thread_lock = threading.Lock()
+        self._health_registry = health_registry
+        if health_registry is not None:
+            health_registry.register(
+                "nfc_reader",
+                stale_after_seconds=5.0,
+            )
+            health_registry.register(
+                "pn532_hardware",
+                stale_after_seconds=5.0,
+            )
 
     def start(self) -> None:
         with self._thread_lock:
@@ -60,24 +72,60 @@ class Pn532NfcReader:
                 self._thread = None
 
     def _run(self) -> None:
-        while not self._stop_event.is_set():
-            self._poll_once()
+        try:
+            while not self._stop_event.is_set():
+                self._poll_once()
+        except Exception as error:
+            if not self._fatal_shutdown_signaled():
+                self._mark_unhealthy(
+                    "nfc_reader",
+                    f"worker thread terminated: {type(error).__name__}: {error}",
+                )
 
     def _poll_once(self) -> None:
-        uid = self._client.read_passive_target(timeout=self._read_timeout_seconds)
+        try:
+            uid = self._client.read_passive_target(timeout=self._read_timeout_seconds)
+        except Exception as error:
+            self._mark_unhealthy(
+                "pn532_hardware",
+                f"{type(error).__name__}: {error}",
+            )
+            raise
+
+        self._heartbeat("pn532_hardware", operation_succeeded=True)
         if uid is None:
             self._handle_absence()
+            self._heartbeat("nfc_reader")
             return
 
         card_id = self._format_uid(uid)
         if not self._armed and self._present_card_id == card_id:
             self._absence_count = 0
+            self._heartbeat("nfc_reader")
             return
 
         self._publish_card(card_id)
         self._present_card_id = card_id
         self._absence_count = 0
         self._armed = False
+        self._heartbeat("nfc_reader", operation_succeeded=True)
+
+    def _heartbeat(self, component: str, *, operation_succeeded: bool = False) -> None:
+        if self._health_registry is not None:
+            self._health_registry.heartbeat(
+                component,
+                operation_succeeded=operation_succeeded,
+            )
+
+    def _mark_unhealthy(self, component: str, reason: str) -> None:
+        if self._health_registry is not None:
+            self._health_registry.unhealthy(component, reason)
+
+    def _fatal_shutdown_signaled(self) -> bool:
+        return (
+            self._health_registry is not None
+            and self._health_registry.fatal_event.is_set()
+        )
 
     def _handle_absence(self) -> None:
         self._absence_count += 1

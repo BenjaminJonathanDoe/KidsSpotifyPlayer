@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 from kidsspotifyplayer.adapters.spotify.device_discovery import (
     resolve_device_id,
 )
+from kidsspotifyplayer.health import HealthRegistry, HealthStatus
 
 
 class FakeSpotifyClient:
@@ -238,3 +239,19 @@ def test_resolve_device_id_rejects_invalid_device_name(
             client,
             device_name,  # type: ignore[arg-type]
         )
+
+
+def test_missing_connect_target_has_distinct_unhealthy_status() -> None:
+    registry = HealthRegistry()
+    client = FakeSpotifyClient({"devices": []})
+
+    with pytest.raises(ValueError, match="No Spotify Connect device"):
+        resolve_device_id(
+            client,
+            "KidsSpotifyPlayer",
+            health_registry=registry,
+        )
+
+    snapshot = registry.snapshot()
+    assert snapshot["spotify_web_api"].status is HealthStatus.HEALTHY
+    assert snapshot["spotify_connect_target"].status is HealthStatus.UNHEALTHY

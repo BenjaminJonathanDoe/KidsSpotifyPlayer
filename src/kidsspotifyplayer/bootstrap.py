@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import time
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,7 @@ from kidsspotifyplayer.adapters.spotify.spotify_web_api_player import (
 from kidsspotifyplayer.application.controller import PlayerController
 from kidsspotifyplayer.event_bus import EventBus
 from kidsspotifyplayer.input import InputCoordinator
+from kidsspotifyplayer.health import HealthMonitor, HealthRegistry
 from kidsspotifyplayer.ports import FeedbackOutput
 
 
@@ -40,12 +41,15 @@ def build_runtime(
     feedback_output: FeedbackOutput | None = None,
     spotify_device_name: str | None = None,
     device_id: str | None = None,
+    health_registry: HealthRegistry | None = None,
 ) -> dict[str, Any]:
     resolved_path = Path(config_path)
 
     event_bus = EventBus()
     input_coordinator = InputCoordinator(event_bus)
     config_repository = JSONConfigRepository(resolved_path)
+    health_registry = health_registry or HealthRegistry()
+    health_registry.register("main_runtime", stale_after_seconds=3.0)
 
     if feedback_output is None:
         feedback_output = _NullFeedbackOutput()
@@ -64,9 +68,13 @@ def build_runtime(
     resolved_device_id = device_id or resolve_device_id(
         spotify_client,
         resolved_device_name,
+        health_registry=health_registry,
     )
 
-    spotify_api_client = SpotipyApiClient(spotify_client)
+    spotify_api_client = SpotipyApiClient(
+        spotify_client,
+        health_registry=health_registry,
+    )
 
     spotify_player = SpotifyWebApiPlayer(
         spotify_api_client,
@@ -87,9 +95,12 @@ def build_runtime(
         reader = Pn532NfcReader(
             _default_pn532_client(),
             input_coordinator,
+            health_registry=health_registry,
         )
 
     reader.start()
+    health_monitor = HealthMonitor(health_registry)
+    health_monitor.start()
 
     return {
         "event_bus": event_bus,
@@ -99,6 +110,8 @@ def build_runtime(
         "controller": controller,
         "nfc_reader": reader,
         "feedback_output": feedback_output,
+        "health_registry": health_registry,
+        "health_monitor": health_monitor,
     }
 
 
@@ -110,13 +123,31 @@ def run_runtime(
         config_path=config_path,
     )
 
+    return supervise_runtime(runtime)
+
+
+def supervise_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
+    logger = logging.getLogger(__name__)
     try:
-        while True:
-            time.sleep(1)
+        while not runtime["health_registry"].fatal_event.wait(timeout=1.0):
+            runtime["health_registry"].heartbeat("main_runtime")
+        runtime["health_monitor"].check_once()
+        failures = runtime["health_registry"].critical_failures()
+        failure_names = ", ".join(failure.name for failure in failures)
+        logger.critical(
+            "runtime terminating for supervisor recovery; failed_components=%s",
+            failure_names,
+        )
+        raise RuntimeError(
+            f"critical runtime health failure: {failure_names}"
+        )
     except KeyboardInterrupt:
         pass
     finally:
-        runtime["nfc_reader"].stop()
+        try:
+            runtime["nfc_reader"].stop()
+        finally:
+            runtime["health_monitor"].stop(timeout_seconds=2.0)
 
     return runtime
 
@@ -156,10 +187,12 @@ def _build_spotify_client() -> spotipy.Spotify:
         ),
         cache_path=token_cache_path,
         open_browser=False,
+        requests_timeout=10,
     )
 
     return spotipy.Spotify(
         auth_manager=auth_manager,
+        requests_timeout=5,
     )
 
 
