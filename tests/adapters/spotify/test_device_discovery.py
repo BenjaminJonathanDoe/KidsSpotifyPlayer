@@ -21,10 +21,10 @@ class FakeSpotifyClient:
         self.response = response
         self.calls: list[dict[str, object]] = []
 
-    def current_user_devices(self) -> dict[str, Any]:
+    def devices(self) -> dict[str, Any]:
         self.calls.append(
             {
-                "method": "current_user_devices",
+                "method": "devices",
             }
         )
         return self.response
@@ -56,7 +56,7 @@ def test_resolve_device_id_returns_exact_name_match() -> None:
 
     assert client.calls == [
         {
-            "method": "current_user_devices",
+            "method": "devices",
         }
     ]
 

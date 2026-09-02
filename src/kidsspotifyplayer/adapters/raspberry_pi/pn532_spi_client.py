@@ -26,6 +26,6 @@ def create_default_pn532_spi_client() -> Pn532SpiClient:
     from digitalio import DigitalInOut
 
     spi = busio.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
-    cs_pin = DigitalInOut(board.D5)
+    cs_pin = DigitalInOut(board.D8)
     device = PN532_SPI(spi, cs_pin, debug=False)
     return Pn532SpiClient(device=device)
