@@ -23,4 +23,4 @@ build/
 .coverage
 htmlcov/
 
-AGENTS.md
+AGENTS.mdgit ls-files AGENTS.md

@@ -2,51 +2,63 @@
   "cards": {
     "00ECEE5C": {
       "uri": "spotify:album:2QuZPXo10JgLaNuVD48VhY",
-      "name": "Was ist was - Fussball"
+      "name": "Was ist was - Fussball",
+      "card": "CARD 0"
     },
     "79429229": {
       "uri": "spotify:track:1fLlRApgzxWweF1JTf8yM5",
-      "name": "given up"
+      "name": "given up",
+      "card": "CARD 69"
     },
     "0457795DCD2A81": {
       "uri": "spotify:TYPE:ID",
-      "name": "CARD 1"
+      "name": "Was ist was Junior - Erforsche die Ozeane"      ,
+    "card": "CARD 1"
     },
     "0493EF5DCD2A81": {
-      "uri": "spotify:TYPE:ID",
-      "name": "CARD 2"
+      "uri": "spotify:album:6sAqbGCOVrCAf7OHruaN6o",
+      "name": "Was ist was Junior - Dinosaurier",
+      "card": "CARD 2"
     },
     "04C86B5ECD2A81": {
-      "uri": "spotify:TYPE:ID",
-      "name": "CARD 3"
+      "uri": "spotify:album:5w5nRGCTFFyZ3yc5DJpRZK",
+      "name": "Was ist was Junior - Naturfüchse im Einsatz",
+      "card": "CARD 3"
     },
     "04791156CE2A81": {
-      "uri": "spotify:TYPE:ID",
-      "name": "CARD 4"
+      "uri": "spotify:album:4advuDqie5MZL7wSEQdFg8",
+      "name": "Was ist was Junior - Retter im Einsatz",
+      "card": "CARD 4"
     },
     "04856A55CE2A81": {
-      "uri": "spotify:TYPE:ID",
-      "name": "CARD 5"
+      "uri": "spotify:album:0sTjN1YO9XfCOkJx9VXVVV",
+      "name": "Eva mit der Gitarre - Ohrwürmer und Kinderlieder",
+      "card": "CARD 5"
     },
     "04FC5C5DCD2A81": {
-      "uri": "spotify:TYPE:ID",
-      "name": "CARD 6"
+      "uri": "spotify:playlist:0vZbsFRQV7skowtt8d9xQr",
+      "name": "Kinderparty - Mats",
+      "card": "CARD 6"
     },
     "04D17E5CCD2A81": {
-      "uri": "spotify:TYPE:ID",
-      "name": "CARD 7"
+      "uri": "spotify:album:4qcs4CnOioPNoKIf6ZNLUy",
+      "name": "Paw Patrol - Dino in der Abenteuerbucht",
+      "card": "CARD 7"
     },
     "04C2DB5BCD2A81": {
-      "uri": "spotify:TYPE:ID",
-      "name": "CARD 8"
+      "uri": "spotify:album:0pFku1xYGKOYjrRvvQ3YBF",
+      "name": "Paw Patrol - Die verschwundenen Dino-Eier",
+      "card": "CARD 8"
     },
     "0454FA5CCD2A81": {
-      "uri": "spotify:TYPE:ID",
-      "name": "CARD 9"
+      "uri": "spotify:album:5Kn4ViQaubj4PcmovgN1BN",
+      "name": "Was ist Was - Roboter und Androiden - Supercomputer",
+      "card": "CARD 9"
     },
     "04145F5ECD2A81": {
-      "uri": "spotify:TYPE:ID",
-      "name": "CARD 10"
+      "uri": "spotify:album:5npdn0ZNa6xmKz5GLFa8QK",
+      "name": "Was ist Was - Unser Körper - das Gehirn",
+      "card": "CARD 10"
     }
   }
 }
