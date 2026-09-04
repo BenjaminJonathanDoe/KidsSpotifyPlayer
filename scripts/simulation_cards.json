@@ -1,16 +1,52 @@
 {
   "cards": {
-    "04A10BFF": {
-      "uri": "spotify:playlist:37i9dQZF1F5p3rmiWPIYgZ",
-      "name": "Test Playlist"
-    },
     "00ECEE5C": {
       "uri": "spotify:album:2QuZPXo10JgLaNuVD48VhY",
       "name": "Was ist was - Fussball"
     },
     "79429229": {
-      "uri": "spotify:Track:1fLlRApgzxWweF1JTf8yM5",
+      "uri": "spotify:track:1fLlRApgzxWweF1JTf8yM5",
       "name": "given up"
+    },
+    "0457795DCD2A81": {
+      "uri": "spotify:TYPE:ID",
+      "name": "CARD 1"
+    },
+    "0493EF5DCD2A81": {
+      "uri": "spotify:TYPE:ID",
+      "name": "CARD 2"
+    },
+    "04C86B5ECD2A81": {
+      "uri": "spotify:TYPE:ID",
+      "name": "CARD 3"
+    },
+    "04791156CE2A81": {
+      "uri": "spotify:TYPE:ID",
+      "name": "CARD 4"
+    },
+    "04856A55CE2A81": {
+      "uri": "spotify:TYPE:ID",
+      "name": "CARD 5"
+    },
+    "04FC5C5DCD2A81": {
+      "uri": "spotify:TYPE:ID",
+      "name": "CARD 6"
+    },
+    "04D17E5CCD2A81": {
+      "uri": "spotify:TYPE:ID",
+      "name": "CARD 7"
+    },
+    "04C2DB5BCD2A81": {
+      "uri": "spotify:TYPE:ID",
+      "name": "CARD 8"
+    },
+    "0454FA5CCD2A81": {
+      "uri": "spotify:TYPE:ID",
+      "name": "CARD 9"
+    },
+    "04145F5ECD2A81": {
+      "uri": "spotify:TYPE:ID",
+      "name": "CARD 10"
     }
   }
 }
